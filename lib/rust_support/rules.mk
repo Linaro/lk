@@ -50,10 +50,10 @@ EXTRA_OBJS := $(EXTRA_OBJS) $(MODULE_OBJECT)
 
 # Bring in the source files via copy.
 # TODO: Symlinks would be better because then it wouldn't be an issue if the user edits these.
-$(MODULE_BUILDDIR)/%: $(MODULE_SRCDIR)/% 
+$(MODULE_BUILDDIR)/%: $(MODULE_SRCDIR)/%.in
 	mkdir -p $(dir $@)
 	cp -p $< $@
-$(MODULE_BUILDDIR)/src/%: $(MODULE_SRCDIR)/src/% 
+$(MODULE_BUILDDIR)/src/%: $(MODULE_SRCDIR)/src/%.in
 	mkdir -p $(dir $@)
 	cp -p $< $@
 
