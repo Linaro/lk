@@ -31,7 +31,7 @@ pub use crate::sys::lk_init_struct;
 macro_rules! LK_INIT_HOOK_FLAGS {
     ($name:ident, $hook:expr, $level:expr, $flags:expr) => {
         #[unsafe(link_section = "lk_init")]
-        #[unsafe(no_mangle)]
+        // #[unsafe(no_mangle)]
         #[used]
         static $name: $crate::init::lk_init_struct = $crate::init::lk_init_struct::new(
             $level,
