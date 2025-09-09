@@ -7,7 +7,8 @@ extern crate alloc;
 extern crate lk_sys as sys;
 
 use alloc::format;
-use core::{alloc::{GlobalAlloc, Layout}, ffi::{c_uint, c_ulong, c_void, CStr}, panic::PanicInfo, ptr::addr_of_mut};
+use core::{alloc::{GlobalAlloc, Layout}, ffi::{c_uint, c_void, CStr}, panic::PanicInfo};
+use core::ptr::addr_of_mut;
 
 pub mod init;
 pub mod log;
@@ -64,7 +65,7 @@ unsafe impl GlobalAlloc for LkAllocator {
 
         // TODO: What is the correct size?  Bindgen put u64 instead of size_t
         unsafe {
-            sys::malloc(size as c_ulong) as *mut u8
+            sys::malloc(size) as *mut u8
         }
     }
 
