@@ -12,6 +12,7 @@ use core::ptr::addr_of_mut;
 
 pub mod init;
 pub mod log;
+pub mod macros;
 
 /// Initialize the rust side of the code.
 ///
