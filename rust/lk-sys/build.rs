@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let bindings = bindings
-        .clang_arg("-nostdinc")
+        .clang_arg("-ffreestanding")
         .prepend_enum_name(false)
         .newtype_enum("lk_init_level")
         .newtype_enum("lk_init_flags")
