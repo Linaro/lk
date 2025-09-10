@@ -19,3 +19,4 @@ tags
 toolchain
 .cache
 vmlinux
+target/
