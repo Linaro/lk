@@ -5,6 +5,9 @@
         }
     ],
     "settings": {
+        "rust-analyzer.linkedProjects": [
+            "build-qemu-virt-arm64-test/lib/rust_support/Cargo.toml"
+        ],
         // Disable auto-formatting till the project decides on a
         // machine-readable config to control it (e.g., .clang-format).
         "[c]": {
@@ -33,17 +36,51 @@
         },
         "markdownlint.config": {
             "MD024": { "siblings_only": true },
+        },
+        // Disable cpptools other than for debugging.
+        "C_Cpp.intelliSenseEngine": "disabled",
+        "C_Cpp.autocomplete": "disabled",
+        "C_Cpp.errorSquiggles": "disabled",
+        "C_Cpp.dimInactiveRegions": false,
+        "C_Cpp.formatting": "disabled",
+        "C_Cpp.codeAnalysis.clangTidy.enabled": false,
+
+        "clangd.enable": true,
+
+        "rust-analyzer.serverPath": "/root/.cargo/bin/rust-analyzer",
+
+        // The build from lk is rather large, increase the scrollback to be able
+        // to find messages.
+        "terminal.integrated.scrollback": 10000,
+        "workbench.colorCustomizations": {
+            "activityBar.activeBackground": "#4b026e",
+            "activityBar.background": "#4b026e",
+            "activityBar.foreground": "#e7e7e7",
+            "activityBar.inactiveForeground": "#e7e7e799",
+            "activityBarBadge.background": "#7d5502",
+            "activityBarBadge.foreground": "#e7e7e7",
+            "commandCenter.border": "#e7e7e799",
+            "sash.hoverBorder": "#4b026e",
+            "statusBar.background": "#29013c",
+            "statusBar.foreground": "#e7e7e7",
+            "statusBarItem.hoverBackground": "#4b026e",
+            "statusBarItem.remoteBackground": "#29013c",
+            "statusBarItem.remoteForeground": "#e7e7e7",
+            "titleBar.activeBackground": "#29013c",
+            "titleBar.activeForeground": "#e7e7e7",
+            "titleBar.inactiveBackground": "#29013c99",
+            "titleBar.inactiveForeground": "#e7e7e799"
         }
     },
     "extensions": {
         "recommendations": [
-            "mkornelsen.vscode-arm64",
-            "llvm-vs-code-extensions.vscode-clangd",
-            "sunshaoce.risc-v",
-            "davidanson.vscode-markdownlint",
-            "xaver.clang-format",
-            "ms-vscode.makefile-tools",
-            "foxundermoon.shell-format"
+            // "mkornelsen.vscode-arm64",
+            // "llvm-vs-code-extensions.vscode-clangd",
+            // "sunshaoce.risc-v",
+            // "davidanson.vscode-markdownlint",
+            // "xaver.clang-format",
+            // "ms-vscode.makefile-tools",
+            // "foxundermoon.shell-format"
         ]
     }
 }
