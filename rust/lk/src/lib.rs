@@ -26,7 +26,7 @@ pub fn init() {
 
 /// Return the current stderr from lk's simple stdio implementation.
 #[inline(always)]
-pub fn lk_stderr() -> *mut sys::FILE {
+fn get_stdfile(index: usize) -> *mut sys::FILE {
     // SAFETY: `__stdio_FILEs` is  defined as an `[]` array in C, which doesn\t have a rust
     // equivalent.  Bindgen generates a zero-element array.  However, Rust does require that static
     // symbols be at an afddress (even if zero sizesd) so this symbol will correspond to the first
@@ -35,8 +35,26 @@ pub fn lk_stderr() -> *mut sys::FILE {
     // defined that way in POSIX.
     unsafe {
         let stdio = addr_of_mut!(sys::__stdio_FILEs) as *mut sys::FILE;
-        stdio.add(2)
+        stdio.add(index)
     }
+}
+
+/// Return the current stderr from lk's simple stdio implementation.
+#[inline(always)]
+pub fn lk_stderr() -> *mut sys::FILE {
+    get_stdfile(2)
+}
+
+/// Return the current stdout from lk's simple stdio implementation.
+#[inline(always)]
+pub fn lk_stdout() -> *mut sys::FILE {
+    get_stdfile(1)
+}
+
+/// Return the current stdin from lk's simple stdio implementation.
+#[inline(always)]
+pub fn lk_stdin() -> *mut sys::FILE {
+    get_stdfile(0)
 }
 
 extern "C" fn sample_rust_hook(_level: c_uint) {
