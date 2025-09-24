@@ -14,4 +14,5 @@ fn panic(_info: &PanicInfo) -> ! {
 #[unsafe(no_mangle)]
 extern "C" fn setup_rust() {
     lk::init();
+    dev_pl011::init();
 }

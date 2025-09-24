@@ -21,5 +21,8 @@
 
 #include <lk/init.h>
 #include <lk/debug.h>
+#include <lib/cbuf.h>
+
+#include <platform/interrupts.h>
 
 // #include "error.h"

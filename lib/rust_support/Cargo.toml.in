@@ -20,6 +20,10 @@ path = "../../../rust/lk-sys" # TODO: substitute this in the makefile?
 version = "0.1.0"
 path = "../../../rust/lk"
 
+[dependencies.dev-pl011]
+version = "0.1.0"
+path = "../../../rust/dev-pl011"
+
 [profile.release]
 debug-assertions = true
 overflow-checks = true

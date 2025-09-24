@@ -45,9 +45,13 @@ fn main() -> anyhow::Result<()> {
         .allowlist_function("free")
         .allowlist_type("obj_ref")
         .allowlist_item("__stdio_FILEs")
+        .allowlist_type("cbuf")
+        .allowlist_function("cbuf.*")
         .allowlist_type("lk_init_level")
         .allowlist_type("lk_init_flags")
         .allowlist_type("lk_init_struct")
+        .allowlist_function("register_int_handler")
+        .allowlist_function("unmask_interrupt")
         .generate()?;
 
     bindings.write_to_file(out_path.join("bindings.rs"))?;
