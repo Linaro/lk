@@ -28,12 +28,12 @@ use alloc::format;
 use core::ffi::c_uint;
 use log::{LevelFilter, Log, Metadata, Record};
 
-use crate::init::lk_init_level;
 use crate::LK_INIT_HOOK;
+use crate::init::lk_init_level;
 
+use crate::lk_stderr;
 use crate::sys::fflush;
 use crate::sys::fputs;
-use crate::lk_stderr;
 // use crate::sys::LK_LOGLEVEL_RUST;
 // TODO: Configure this properly.
 static LK_LOGLEVEL_RUST: usize = 4;
@@ -48,7 +48,7 @@ impl Log for TrustyKernelLogger {
     }
 
     fn log(&self, record: &Record) {
-        unsafe { fputs(c"Log a message\n".as_ptr(), lk_stderr()); }
+        // unsafe { fputs(c"Log a message\n".as_ptr(), lk_stderr()); }
         if self.enabled(record.metadata()) {
             let cstr = CString::new(format!("{} - {}\n", record.level(), record.args())).unwrap();
             // Safety:
@@ -98,4 +98,8 @@ extern "C" fn kernel_log_init_func(_level: c_uint) {
 }
 
 // LK_INIT_HOOK!(KERNEL_LOG_INIT, kernel_log_init_func, lk_init_level::LK_INIT_LEVEL_HEAP);
-LK_INIT_HOOK!(KERNEL_LOG_INIT, kernel_log_init_func, lk_init_level::LK_INIT_LEVEL_ARCH);
+LK_INIT_HOOK!(
+    KERNEL_LOG_INIT,
+    kernel_log_init_func,
+    lk_init_level::LK_INIT_LEVEL_ARCH
+);

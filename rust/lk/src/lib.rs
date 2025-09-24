@@ -4,15 +4,20 @@
 
 extern crate alloc;
 
-extern crate lk_sys as sys;
+pub extern crate lk_sys as sys;
 
 use alloc::format;
-use core::{alloc::{GlobalAlloc, Layout}, ffi::{c_uint, c_void, CStr}, panic::PanicInfo};
 use core::ptr::addr_of_mut;
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    ffi::{CStr, c_uint, c_void},
+    panic::PanicInfo,
+};
 
 pub mod init;
 pub mod log;
 pub mod macros;
+// pub mod spinlock;
 
 /// Initialize the rust side of the code.
 ///
@@ -74,7 +79,11 @@ static SETUP_RUST_HOOK: sys::lk_init_struct = sys::lk_init_struct {
     name: c"lk_rust_hook".as_ptr(),
 };
 */
-LK_INIT_HOOK!(SETUP_RUST_HOOK, sample_rust_hook, init::lk_init_level::LK_INIT_LEVEL_PLATFORM);
+LK_INIT_HOOK!(
+    SETUP_RUST_HOOK,
+    sample_rust_hook,
+    init::lk_init_level::LK_INIT_LEVEL_PLATFORM
+);
 
 pub struct LkAllocator;
 
@@ -83,15 +92,11 @@ unsafe impl GlobalAlloc for LkAllocator {
         let size = layout.size();
 
         // TODO: What is the correct size?  Bindgen put u64 instead of size_t
-        unsafe {
-            sys::malloc(size) as *mut u8
-        }
+        unsafe { sys::malloc(size) as *mut u8 }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-        unsafe {
-            sys::free(ptr as *mut c_void)
-        }
+        unsafe { sys::free(ptr as *mut c_void) }
     }
 }
 
