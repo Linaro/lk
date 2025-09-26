@@ -16,6 +16,7 @@ use core::{
 
 pub mod cbuf;
 pub mod init;
+pub mod lkonce;
 pub mod log;
 pub mod macros;
 // pub mod spinlock;
