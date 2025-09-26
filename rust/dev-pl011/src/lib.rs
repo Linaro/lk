@@ -7,12 +7,16 @@ use core::{
     ffi::{c_char, c_int, c_void},
     mem, panic, ptr,
 };
-use lk::sys;
+use lk::{cbuf::Cbuf, sys};
 
 extern crate alloc;
 
 unsafe extern "C" {
     static mut console_input_cbuf: sys::cbuf;
+}
+
+fn get_console_input_cbuf() -> Cbuf {
+    unsafe { Cbuf::new(&raw mut console_input_cbuf) }
 }
 
 /// Init function to ensure crate is linked.
@@ -121,6 +125,7 @@ static PL011_UARTS: SyncUnsafeCell<Pl011Uart> = SyncUnsafeCell::new(unsafe { mem
 extern "C" fn uart_irq(arg: *mut c_void) -> sys::handler_return {
     let uart = unsafe { &mut *(arg as *mut Pl011Uart) };
     let base = uart.config.base;
+    let buf = get_console_input_cbuf();
 
     // uart_pputc(0, b'I');
 
@@ -135,22 +140,18 @@ extern "C" fn uart_irq(arg: *mut c_void) -> sys::handler_return {
             if CONSOLE_HAS_INPUT_BUFFER {
                 if uart.config.flag & PL011_FLAG_DEBUG_UART != 0 {
                     let c = read_uart_reg(base, Pl011UartRegs::Dr) as c_char;
-                    unsafe {
-                        sys::cbuf_write_char(&raw mut console_input_cbuf, c, false);
-                    }
+                    buf.write_char(c, false);
                     continue;
                 }
             }
 
             // If we're out of rx buffer, mask the irq instead of handling it.
-            if unsafe { sys::cbuf_space_avail(&mut uart.rx_buf) } == 0 {
+            if buf.is_full() {
                 clear_uart_reg_bits(base, Pl011UartRegs::Imsc, UART_IMSC_RXIM);
                 break;
             }
             let c = read_uart_reg(base, Pl011UartRegs::Dr) as c_char;
-            unsafe {
-                sys::cbuf_write_char(&mut uart.rx_buf, c, false);
-            }
+            buf.write_char(c, false);
         }
 
         resched = true;
