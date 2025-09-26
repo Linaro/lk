@@ -14,6 +14,7 @@ use core::{
     panic::PanicInfo,
 };
 
+pub mod cbuf;
 pub mod init;
 pub mod log;
 pub mod macros;
