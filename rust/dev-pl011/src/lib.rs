@@ -5,9 +5,9 @@
 use core::{
     cell::UnsafeCell,
     ffi::{c_char, c_int, c_void},
-    mem, panic, ptr,
+    panic, ptr,
 };
-use lk::{cbuf::Cbuf, sys};
+use lk::{cbuf::Cbuf, lkonce::LkOnce, sys};
 
 extern crate alloc;
 
@@ -95,37 +95,36 @@ struct pl011_config {
 /// directly translation from the C code.
 struct Pl011Uart {
     config: pl011_config,
-    rx_buf: sys::cbuf,
+    rx_buf: UnsafeCell<sys::cbuf>,
 }
 
+/// The underlying cbuf is actually Sync because it uses its own spinlock.
 unsafe impl Sync for Pl011Uart {}
 
-struct SyncUnsafeCell<T>(UnsafeCell<T>);
-
-unsafe impl<T> Sync for SyncUnsafeCell<T> {}
-
-impl<T> SyncUnsafeCell<T> {
-    const fn new(value: T) -> Self {
-        SyncUnsafeCell(UnsafeCell::new(value))
+/// Get a reference to the given uart.
+fn get_uart(port: usize) -> &'static Pl011Uart {
+    if port >= PL011_UARTS.len() {
+        // For now, just panic if we access an invalid port.
+        panic!("pl011: invalid port {}", port);
     }
+    PL011_UARTS[port].get()
+}
 
-    #[allow(dead_code)]
-    fn get(&self) -> *mut T {
-        self.0.get()
+/// Get a reference to the given uart that only requires early init to have been done.
+fn get_uart_early(port: usize) -> &'static Pl011Uart {
+    if port >= PL011_UARTS.len() {
+        // For now, just panic if we access an invalid port.
+        panic!("pl011: invalid port {}", port);
     }
-
-    #[allow(dead_code)]
-    fn get_mut(&self) -> &mut T {
-        unsafe { &mut *self.0.get() }
-    }
+    PL011_UARTS[port].get_early()
 }
 
 const RXBUF_SIZE: usize = 32;
 
-static PL011_UARTS: SyncUnsafeCell<Pl011Uart> = SyncUnsafeCell::new(unsafe { mem::zeroed() });
+static PL011_UARTS: [LkOnce<Pl011Uart>; 1] = [LkOnce::uninit()];
 
 extern "C" fn uart_irq(arg: *mut c_void) -> sys::handler_return {
-    let uart = unsafe { &mut *(arg as *mut Pl011Uart) };
+    let uart = unsafe { &*(arg as *const Pl011Uart) };
     let base = uart.config.base;
     let buf = get_console_input_cbuf();
 
@@ -170,62 +169,46 @@ extern "C" fn uart_irq(arg: *mut c_void) -> sys::handler_return {
 /// characters.
 #[unsafe(no_mangle)]
 extern "C" fn pl011_init_early(port: isize, config: *const pl011_config) {
-    // TODO: Handle more than one port.
-    let _ = port;
-
-    unsafe {
-        let uarts = PL011_UARTS.get_mut();
-
-        uarts.config = (*config).clone();
-    }
+    PL011_UARTS[port as usize].early_init(|uart| unsafe {
+        (*uart).config = (*config).clone();
+    });
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn pl011_init(port: isize) {
-    let _ = port;
-
-    let uart = PL011_UARTS.get_mut();
-    let base = uart.config.base;
-
     unsafe {
-        sys::cbuf_initialize(&mut uart.rx_buf, RXBUF_SIZE);
-    }
+        PL011_UARTS[port as usize].init(|uart| {
+            let uart = &mut *uart;
+            let base = uart.config.base;
+            sys::cbuf_initialize(uart.rx_buf.get(), RXBUF_SIZE);
 
-    // Assumes interrupts are contiguous
-    unsafe {
-        sys::register_int_handler(
-            uart.config.irq,
-            Some(uart_irq),
-            uart as *mut Pl011Uart as *mut c_void,
-        );
-    }
-    log::info!("pl011: registered irq {}", uart.config.irq);
-    log::info!("pl011: block at {:p}", uart);
-    log::info!("pl011: basse {:#x}", base);
+            sys::register_int_handler(
+                uart.config.irq,
+                Some(uart_irq),
+                uart as *mut Pl011Uart as *mut c_void,
+            );
 
-    // Clear all irqs
-    write_uart_reg(base, Pl011UartRegs::Icr, 0x3FF);
+            // Clear all irqs
+            write_uart_reg(base, Pl011UartRegs::Icr, 0x3FF);
 
-    // Set fifo trigger level
-    write_uart_reg(base, Pl011UartRegs::Ifls, 0); // 1/8 full, 1/8 txfifo
+            // Set fifo trigger level
+            write_uart_reg(base, Pl011UartRegs::Ifls, 0); // 1/8 full, 1/8 txfifo
 
-    // Enable rx interrupt
-    write_uart_reg(base, Pl011UartRegs::Imsc, UART_IMSC_RXIM);
+            // Enable rx interrupt
+            write_uart_reg(base, Pl011UartRegs::Imsc, UART_IMSC_RXIM);
 
-    // Enable receive
-    set_uart_reg_bits(base, Pl011UartRegs::Cr, UART_CR_RXEN);
+            // Enable receive
+            set_uart_reg_bits(base, Pl011UartRegs::Cr, UART_CR_RXEN);
 
-    // Enable interrupt
-    unsafe {
-        sys::unmask_interrupt(uart.config.irq);
-    }
+            // Enable interrupt
+            sys::unmask_interrupt(uart.config.irq);
+        })
+    };
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uart_putc(port: c_int, c: c_char) {
-    let _ = port;
-
-    let uart = PL011_UARTS.get_mut();
+    let uart = get_uart_early(port as usize);
     let base = uart.config.base;
 
     // Spin while fifo is full.
@@ -235,13 +218,11 @@ extern "C" fn uart_putc(port: c_int, c: c_char) {
 
 #[unsafe(no_mangle)]
 extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
-    let _ = port;
-
-    let uart = PL011_UARTS.get_mut();
+    let uart = get_uart(port as usize);
     let base = uart.config.base;
+    let buf = unsafe { Cbuf::new(uart.rx_buf.get()) };
 
-    let mut ch = 0;
-    if unsafe { sys::cbuf_read_char(&mut uart.rx_buf, &mut ch, wait) } == 1 {
+    if let Some(ch) = buf.read_char(wait) {
         set_uart_reg_bits(base, Pl011UartRegs::Imsc, UART_IMSC_RXIM);
         return ch as c_int;
     }
@@ -252,9 +233,7 @@ extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
 /// Panic-time putc.
 #[unsafe(no_mangle)]
 extern "C" fn uart_pputc(port: c_int, c: c_char) -> c_int {
-    let _ = port;
-
-    let uart = PL011_UARTS.get_mut();
+    let uart = get_uart_early(port as usize);
     let base = uart.config.base;
 
     // Spin while fifo is full.
