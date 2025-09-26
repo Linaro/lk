@@ -109,10 +109,12 @@ impl<T> SyncUnsafeCell<T> {
         SyncUnsafeCell(UnsafeCell::new(value))
     }
 
+    #[allow(dead_code)]
     fn get(&self) -> *mut T {
         self.0.get()
     }
 
+    #[allow(dead_code)]
     fn get_mut(&self) -> &mut T {
         unsafe { &mut *self.0.get() }
     }
