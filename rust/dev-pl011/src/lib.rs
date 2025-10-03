@@ -232,6 +232,10 @@ extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
     let buf = unsafe { Cbuf::new(uart.rx_buf.get()) };
 
     if let Some(ch) = buf.read_char(wait) {
+        // TODO: This modify is racy, as the interrupt handler also does a
+        // modify of this same register. As long as we are only using a single
+        // interrupt, this isn't unsafe or incorrect, but will cause problems if
+        // we even implement the transmit interrupt as well.
         dev.modify_imsc(|imsc| imsc | UART_IMSC_RXIM);
         return ch as c_int;
     }
