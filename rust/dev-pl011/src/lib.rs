@@ -5,8 +5,10 @@
 use core::{
     cell::UnsafeCell,
     ffi::{c_char, c_int, c_void},
-    panic, ptr,
+    mem::offset_of,
+    panic,
 };
+use derive_mmio::Mmio;
 use lk::{cbuf::Cbuf, lkonce::LkOnce, sys};
 
 extern crate alloc;
@@ -25,24 +27,45 @@ pub fn init() {
     // Nothing to do yet.
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Mmio)]
+#[repr(C)]
+pub struct UartRegs {
+    dr: u32,              // 0x00 Data Register
+    rsr: u32,             // 0x04 Receive Status / Error Clear
+    _reserved1: [u32; 4], // 0x08 - 0x0C reserved
+    tfr: u32,             // 0x18 Flag Register
+    _reserved2: [u32; 1], // 0x1C reserved
+    iplr: u32,            // 0x20 Interrupt Priority Level Register
+    ibrd: u32,            // 0x24 Integer Baud Rate Divisor
+    fbrd: u32,            // 0x28 Fractional Baud Rate Divisor
+    lcrh: u32,            // 0x2C Line Control Register
+    cr: u32,              // 0x30 Control Register
+    ifls: u32,            // 0x34 Interrupt FIFO Level Select
+    imsc: u32,            // 0x38 Interrupt Mask Set/Clear
+    tris: u32,            // 0x3C Raw Interrupt Status
+    tmis: u32,            // 0x40 Masked Interrupt Status
+    icr: u32,             // 0x44 Interrupt Clear Register
+    dmacr: u32,           // 0x48 DMA Control Register
+}
+
+/// Verify that UartRegs has the expected layout
 #[allow(dead_code)]
-enum Pl011UartRegs {
-    Dr = 0x00,  // Data Register
-    Rsr = 0x04, // Receive Status / Error Clear
-    // 0x08 - reserved
-    Tfr = 0x18,   // Flag Register
-    Iplr = 0x20,  // Interrupt Priority Level Register
-    Ibrd = 0x24,  // Integer Baud Rate Divisor
-    Fbrd = 0x28,  // Fractional Baud Rate Divisor
-    Lcrh = 0x2C,  // Line Control Register
-    Cr = 0x30,    // Control Register
-    Ifls = 0x34,  // Interrupt FIFO Level Select
-    Imsc = 0x38,  // Interrupt Mask Set/Clear
-    Tris = 0x3C,  // Raw Interrupt Status
-    Tmis = 0x40,  // Masked Interrupt Status
-    Icr = 0x44,   // Interrupt Clear Register
-    Dmacr = 0x48, // DMA Control Register
+fn verify_uart_regs_layout() {
+    // These will cause compile-time errors if offsets don't match
+    const _: () = assert!(offset_of!(UartRegs, dr) == 0x00);
+    const _: () = assert!(offset_of!(UartRegs, rsr) == 0x04);
+    const _: () = assert!(offset_of!(UartRegs, tfr) == 0x18);
+    const _: () = assert!(offset_of!(UartRegs, iplr) == 0x20);
+    const _: () = assert!(offset_of!(UartRegs, ibrd) == 0x24);
+    const _: () = assert!(offset_of!(UartRegs, fbrd) == 0x28);
+    const _: () = assert!(offset_of!(UartRegs, lcrh) == 0x2c);
+    const _: () = assert!(offset_of!(UartRegs, cr) == 0x30);
+    const _: () = assert!(offset_of!(UartRegs, ifls) == 0x34);
+    const _: () = assert!(offset_of!(UartRegs, imsc) == 0x38);
+    const _: () = assert!(offset_of!(UartRegs, tris) == 0x3c);
+    const _: () = assert!(offset_of!(UartRegs, tmis) == 0x40);
+    const _: () = assert!(offset_of!(UartRegs, icr) == 0x44);
+    const _: () = assert!(offset_of!(UartRegs, dmacr) == 0x48);
 }
 
 const CONSOLE_HAS_INPUT_BUFFER: bool = true;
@@ -58,28 +81,6 @@ const UART_IMSC_RXIM: u32 = 1 << 4; // Receive interrupt mask
 const UART_TMIS_RXMIS: u32 = 1 << 4; // Receive masked interrupt status
 
 const UART_CR_RXEN: u32 = 1 << 9; // Receive enable
-
-/// Unsafe write to a UART register.
-fn write_uart_reg(base: usize, reg: Pl011UartRegs, value: u32) {
-    unsafe {
-        ptr::write_volatile((base + reg as usize) as *mut u32, value);
-    }
-}
-
-fn set_uart_reg_bits(base: usize, reg: Pl011UartRegs, bits: u32) {
-    let val = read_uart_reg(base, reg);
-    write_uart_reg(base, reg, val | bits);
-}
-
-fn clear_uart_reg_bits(base: usize, reg: Pl011UartRegs, bits: u32) {
-    let val = read_uart_reg(base, reg);
-    write_uart_reg(base, reg, val & !bits);
-}
-
-/// Unsafe read UART register
-fn read_uart_reg(base: usize, reg: Pl011UartRegs) -> u32 {
-    unsafe { ptr::read_volatile((base + reg as usize) as *const u32) }
-}
 
 // TODO: Don't make this manually.
 #[repr(C)]
@@ -119,28 +120,35 @@ fn get_uart_early(port: usize) -> &'static Pl011Uart {
     PL011_UARTS[port].get_early()
 }
 
+impl Pl011Uart {
+    /// Get the device handle for the given Uart.
+    fn get_dev(&self) -> MmioUartRegs<'static> {
+        unsafe { UartRegs::new_mmio_at(self.config.base) }
+    }
+}
+
 const RXBUF_SIZE: usize = 32;
 
 static PL011_UARTS: [LkOnce<Pl011Uart>; 1] = [LkOnce::uninit()];
 
 extern "C" fn uart_irq(arg: *mut c_void) -> sys::handler_return {
     let uart = unsafe { &*(arg as *const Pl011Uart) };
-    let base = uart.config.base;
+    let mut dev = uart.get_dev();
     let buf = get_console_input_cbuf();
 
     // uart_pputc(0, b'I');
 
     let mut resched = false;
 
-    let isr = read_uart_reg(base, Pl011UartRegs::Tmis);
+    let isr = dev.read_tmis();
 
     // Read characters from the fifo until it's empty.
     // TODO: This is wrong, and doesn't handle the cbuf overflow.
     if (isr & UART_TMIS_RXMIS) != 0 {
-        while (read_uart_reg(base, Pl011UartRegs::Tfr) & UART_TFR_RXFE) == 0 {
+        while (dev.read_tfr() & UART_TFR_RXFE) == 0 {
             if CONSOLE_HAS_INPUT_BUFFER {
                 if uart.config.flag & PL011_FLAG_DEBUG_UART != 0 {
-                    let c = read_uart_reg(base, Pl011UartRegs::Dr) as c_char;
+                    let c = dev.read_dr() as c_char;
                     buf.write_char(c, false);
                     continue;
                 }
@@ -148,10 +156,10 @@ extern "C" fn uart_irq(arg: *mut c_void) -> sys::handler_return {
 
             // If we're out of rx buffer, mask the irq instead of handling it.
             if buf.is_full() {
-                clear_uart_reg_bits(base, Pl011UartRegs::Imsc, UART_IMSC_RXIM);
+                dev.modify_imsc(|imsc| imsc & !UART_IMSC_RXIM);
                 break;
             }
-            let c = read_uart_reg(base, Pl011UartRegs::Dr) as c_char;
+            let c = dev.read_dr() as c_char;
             buf.write_char(c, false);
         }
 
@@ -179,8 +187,9 @@ extern "C" fn pl011_init(port: isize) {
     unsafe {
         PL011_UARTS[port as usize].init(|uart| {
             let uart = &mut *uart;
-            let base = uart.config.base;
             sys::cbuf_initialize(uart.rx_buf.get(), RXBUF_SIZE);
+
+            let mut dev = uart.get_dev();
 
             sys::register_int_handler(
                 uart.config.irq,
@@ -189,16 +198,16 @@ extern "C" fn pl011_init(port: isize) {
             );
 
             // Clear all irqs
-            write_uart_reg(base, Pl011UartRegs::Icr, 0x3FF);
+            dev.write_icr(0x3FF);
 
             // Set fifo trigger level
-            write_uart_reg(base, Pl011UartRegs::Ifls, 0); // 1/8 full, 1/8 txfifo
+            dev.write_ifls(0); // 1/8 full, 1/8 txfifo
 
             // Enable rx interrupt
-            write_uart_reg(base, Pl011UartRegs::Imsc, UART_IMSC_RXIM);
+            dev.modify_imsc(|imsc| imsc | UART_IMSC_RXIM);
 
             // Enable receive
-            set_uart_reg_bits(base, Pl011UartRegs::Cr, UART_CR_RXEN);
+            dev.modify_cr(|cr| cr | UART_CR_RXEN);
 
             // Enable interrupt
             sys::unmask_interrupt(uart.config.irq);
@@ -209,21 +218,21 @@ extern "C" fn pl011_init(port: isize) {
 #[unsafe(no_mangle)]
 extern "C" fn uart_putc(port: c_int, c: c_char) {
     let uart = get_uart_early(port as usize);
-    let base = uart.config.base;
+    let mut dev = uart.get_dev();
 
     // Spin while fifo is full.
-    while (read_uart_reg(base, Pl011UartRegs::Tfr) & UART_TFR_TXFF) != 0 {}
-    write_uart_reg(base, Pl011UartRegs::Dr, c as u32);
+    while (dev.read_tfr() & UART_TFR_TXFF) != 0 {}
+    dev.write_dr(c as u32);
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
     let uart = get_uart(port as usize);
-    let base = uart.config.base;
+    let mut dev = uart.get_dev();
     let buf = unsafe { Cbuf::new(uart.rx_buf.get()) };
 
     if let Some(ch) = buf.read_char(wait) {
-        set_uart_reg_bits(base, Pl011UartRegs::Imsc, UART_IMSC_RXIM);
+        dev.modify_imsc(|imsc| imsc | UART_IMSC_RXIM);
         return ch as c_int;
     }
 
@@ -234,11 +243,11 @@ extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
 #[unsafe(no_mangle)]
 extern "C" fn uart_pputc(port: c_int, c: c_char) -> c_int {
     let uart = get_uart_early(port as usize);
-    let base = uart.config.base;
+    let mut dev = uart.get_dev();
 
     // Spin while fifo is full.
-    while (read_uart_reg(base, Pl011UartRegs::Tfr) & UART_TFR_TXFF) != 0 {}
-    write_uart_reg(base, Pl011UartRegs::Dr, c as u32);
+    while (dev.read_tfr() & UART_TFR_TXFF) != 0 {}
+    dev.write_dr(c as u32);
 
     return 1;
 }

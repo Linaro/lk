@@ -147,3 +147,8 @@ wrapper around a bare pointer. The pointer itself is not accessible, preventing
 unsound memory access, and can only be generated and accessed from an initial
 constructor. This wrapper type will have read reference semantics, which can
 simply be implemented by implementing Copy and Clone for the type.
+
+What seems to work well for the pl011 driver is to use derive_mmio, and build an
+owned instance of it for each context we wish to use it. This creation is unsafe
+(as it can't guarantee that our use of the device is correct), but it does allow
+for write access to the device registers.

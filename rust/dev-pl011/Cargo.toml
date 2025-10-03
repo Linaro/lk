@@ -14,3 +14,6 @@ path = "../lk"
 
 [dependencies.log]
 version = "0.4.27"
+
+[dependencies.derive-mmio]
+version = "0.6.1"
