@@ -7,9 +7,13 @@ use core::{
     ffi::{c_char, c_int, c_void},
     mem::offset_of,
     panic,
+    ptr::NonNull,
 };
-use derive_mmio::Mmio;
 use lk::{cbuf::Cbuf, lkonce::LkOnce, sys};
+use safe_mmio::{
+    UniqueMmioPointer, field,
+    fields::{ReadWrite, WriteOnly},
+};
 
 extern crate alloc;
 
@@ -27,25 +31,25 @@ pub fn init() {
     // Nothing to do yet.
 }
 
-#[derive(Mmio)]
+/// Representation of the UART registers for MMIO access.
 #[repr(C)]
 pub struct UartRegs {
-    dr: u32,              // 0x00 Data Register
-    rsr: u32,             // 0x04 Receive Status / Error Clear
-    _reserved1: [u32; 4], // 0x08 - 0x0C reserved
-    tfr: u32,             // 0x18 Flag Register
-    _reserved2: [u32; 1], // 0x1C reserved
-    iplr: u32,            // 0x20 Interrupt Priority Level Register
-    ibrd: u32,            // 0x24 Integer Baud Rate Divisor
-    fbrd: u32,            // 0x28 Fractional Baud Rate Divisor
-    lcrh: u32,            // 0x2C Line Control Register
-    cr: u32,              // 0x30 Control Register
-    ifls: u32,            // 0x34 Interrupt FIFO Level Select
-    imsc: u32,            // 0x38 Interrupt Mask Set/Clear
-    tris: u32,            // 0x3C Raw Interrupt Status
-    tmis: u32,            // 0x40 Masked Interrupt Status
-    icr: u32,             // 0x44 Interrupt Clear Register
-    dmacr: u32,           // 0x48 DMA Control Register
+    dr: ReadWrite<u32>,    // 0x00 Data Register
+    rsr: ReadWrite<u32>,   // 0x04 Receive Status / Error Clear
+    _reserved1: [u32; 4],  // 0x08 - 0x0C reserved
+    tfr: ReadWrite<u32>,   // 0x18 Flag Register
+    _reserved2: [u32; 1],  // 0x1C reserved
+    iplr: ReadWrite<u32>,  // 0x20 Interrupt Priority Level Register
+    ibrd: ReadWrite<u32>,  // 0x24 Integer Baud Rate Divisor
+    fbrd: ReadWrite<u32>,  // 0x28 Fractional Baud Rate Divisor
+    lcrh: ReadWrite<u32>,  // 0x2C Line Control Register
+    cr: ReadWrite<u32>,    // 0x30 Control Register
+    ifls: ReadWrite<u32>,  // 0x34 Interrupt FIFO Level Select
+    imsc: ReadWrite<u32>,  // 0x38 Interrupt Mask Set/Clear
+    tris: ReadWrite<u32>,  // 0x3C Raw Interrupt Status
+    tmis: ReadWrite<u32>,  // 0x40 Masked Interrupt Status
+    icr: WriteOnly<u32>,   // 0x44 Interrupt Clear Register
+    dmacr: ReadWrite<u32>, // 0x48 DMA Control Register
 }
 
 /// Verify that UartRegs has the expected layout
@@ -121,9 +125,27 @@ fn get_uart_early(port: usize) -> &'static Pl011Uart {
 }
 
 impl Pl011Uart {
-    /// Get the device handle for the given Uart.
-    fn get_dev(&self) -> MmioUartRegs<'static> {
-        unsafe { UartRegs::new_mmio_at(self.config.base) }
+    /// Get the mmio handle for the given UART.
+    ///
+    /// # Safety
+    /// This routine is not marked as unsafe, as we assume that the struct has
+    /// been initialized with a proper offset of the base of the uart registers.
+    /// Although the docs for safe-mmio suggest that having multiple instances
+    /// of this handle is unsafe, this is not a rust safety issue. The hardware
+    /// block, and memory semantics are well defined for multiple concurrent
+    /// access (including writes) and incorrect use is a logic error in the
+    /// driver, not an issue of Rust memory safety.
+    ///
+    /// But, this conflation of the Rust borrow checker's rules around only one
+    /// instance of a mutable reference, and how the hardware works is
+    /// persistent. As the underlying MMIO is implemented using raw pointers,
+    /// there are no references, having multiple instances of this handle is
+    /// perfectly safe.
+    ///
+    /// It is important that the returned handle is 'static, otherwise we only
+    /// get one borrow which defeats the entire purpose of this routine.
+    fn get_sdev(&self) -> UniqueMmioPointer<'static, UartRegs> {
+        unsafe { UniqueMmioPointer::new(NonNull::new(self.config.base as _).unwrap()) }
     }
 }
 
@@ -133,33 +155,35 @@ static PL011_UARTS: [LkOnce<Pl011Uart>; 1] = [LkOnce::uninit()];
 
 extern "C" fn uart_irq(arg: *mut c_void) -> sys::handler_return {
     let uart = unsafe { &*(arg as *const Pl011Uart) };
-    let mut dev = uart.get_dev();
+    let mut dev = uart.get_sdev();
     let buf = get_console_input_cbuf();
 
     // uart_pputc(0, b'I');
 
     let mut resched = false;
 
-    let isr = dev.read_tmis();
+    let isr = field!(dev, tmis).read();
 
     // Read characters from the fifo until it's empty.
     // TODO: This is wrong, and doesn't handle the cbuf overflow.
     if (isr & UART_TMIS_RXMIS) != 0 {
-        while (dev.read_tfr() & UART_TFR_RXFE) == 0 {
+        while (field!(dev, tfr).read() & UART_TFR_RXFE) == 0 {
             if CONSOLE_HAS_INPUT_BUFFER {
                 if uart.config.flag & PL011_FLAG_DEBUG_UART != 0 {
-                    let c = dev.read_dr() as c_char;
+                    let c = field!(dev, dr).read() as c_char;
                     buf.write_char(c, false);
                     continue;
                 }
             }
 
             // If we're out of rx buffer, mask the irq instead of handling it.
+            // TODO: This is racy, as the interrupt is owned by the user side code.
             if buf.is_full() {
-                dev.modify_imsc(|imsc| imsc & !UART_IMSC_RXIM);
+                let old = field!(dev, imsc).read();
+                field!(dev, imsc).write(old & !UART_IMSC_RXIM);
                 break;
             }
-            let c = dev.read_dr() as c_char;
+            let c = field!(dev, dr).read() as c_char;
             buf.write_char(c, false);
         }
 
@@ -189,7 +213,7 @@ extern "C" fn pl011_init(port: isize) {
             let uart = &mut *uart;
             sys::cbuf_initialize(uart.rx_buf.get(), RXBUF_SIZE);
 
-            let mut dev = uart.get_dev();
+            let mut dev = uart.get_sdev();
 
             sys::register_int_handler(
                 uart.config.irq,
@@ -198,16 +222,18 @@ extern "C" fn pl011_init(port: isize) {
             );
 
             // Clear all irqs
-            dev.write_icr(0x3FF);
+            field!(dev, icr).write(0x3FF);
 
             // Set fifo trigger level
-            dev.write_ifls(0); // 1/8 full, 1/8 txfifo
+            field!(dev, ifls).write(0); // 1/8 full, 1/8 txfifo
 
             // Enable rx interrupt
-            dev.modify_imsc(|imsc| imsc | UART_IMSC_RXIM);
+            let old = field!(dev, imsc).read();
+            field!(dev, imsc).write(old | UART_IMSC_RXIM);
 
             // Enable receive
-            dev.modify_cr(|cr| cr | UART_CR_RXEN);
+            let old = field!(dev, cr).read();
+            field!(dev, cr).write(old | UART_CR_RXEN);
 
             // Enable interrupt
             sys::unmask_interrupt(uart.config.irq);
@@ -218,17 +244,17 @@ extern "C" fn pl011_init(port: isize) {
 #[unsafe(no_mangle)]
 extern "C" fn uart_putc(port: c_int, c: c_char) {
     let uart = get_uart_early(port as usize);
-    let mut dev = uart.get_dev();
+    let mut dev = uart.get_sdev();
 
     // Spin while fifo is full.
-    while (dev.read_tfr() & UART_TFR_TXFF) != 0 {}
-    dev.write_dr(c as u32);
+    while (field!(dev, tfr).read() & UART_TFR_TXFF) != 0 {}
+    field!(dev, dr).write(c as u32);
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
     let uart = get_uart(port as usize);
-    let mut dev = uart.get_dev();
+    let mut dev = uart.get_sdev();
     let buf = unsafe { Cbuf::new(uart.rx_buf.get()) };
 
     if let Some(ch) = buf.read_char(wait) {
@@ -236,7 +262,10 @@ extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
         // modify of this same register. As long as we are only using a single
         // interrupt, this isn't unsafe or incorrect, but will cause problems if
         // we even implement the transmit interrupt as well.
-        dev.modify_imsc(|imsc| imsc | UART_IMSC_RXIM);
+        // Realistically, the interrupt handler should not be touching this register
+        let mut f = field!(dev, tmis);
+        let old = f.read();
+        f.write(old | UART_TMIS_RXMIS);
         return ch as c_int;
     }
 
@@ -247,11 +276,11 @@ extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
 #[unsafe(no_mangle)]
 extern "C" fn uart_pputc(port: c_int, c: c_char) -> c_int {
     let uart = get_uart_early(port as usize);
-    let mut dev = uart.get_dev();
+    let mut dev = uart.get_sdev();
 
     // Spin while fifo is full.
-    while (dev.read_tfr() & UART_TFR_TXFF) != 0 {}
-    dev.write_dr(c as u32);
+    while field!(dev, tfr).read() & UART_TFR_TXFF != 0 {}
+    field!(dev, dr).write(c as u32);
 
     return 1;
 }
