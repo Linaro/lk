@@ -37,7 +37,7 @@ pub struct UartRegs {
     dr: ReadWrite<u32>,    // 0x00 Data Register
     rsr: ReadWrite<u32>,   // 0x04 Receive Status / Error Clear
     _reserved1: [u32; 4],  // 0x08 - 0x0C reserved
-    tfr: ReadWrite<u32>,   // 0x18 Flag Register
+    fr: ReadWrite<u32>,    // 0x18 Flag Register
     _reserved2: [u32; 1],  // 0x1C reserved
     iplr: ReadWrite<u32>,  // 0x20 Interrupt Priority Level Register
     ibrd: ReadWrite<u32>,  // 0x24 Integer Baud Rate Divisor
@@ -46,8 +46,8 @@ pub struct UartRegs {
     cr: ReadWrite<u32>,    // 0x30 Control Register
     ifls: ReadWrite<u32>,  // 0x34 Interrupt FIFO Level Select
     imsc: ReadWrite<u32>,  // 0x38 Interrupt Mask Set/Clear
-    tris: ReadWrite<u32>,  // 0x3C Raw Interrupt Status
-    tmis: ReadWrite<u32>,  // 0x40 Masked Interrupt Status
+    ris: ReadWrite<u32>,   // 0x3C Raw Interrupt Status
+    mis: ReadWrite<u32>,   // 0x40 Masked Interrupt Status
     icr: WriteOnly<u32>,   // 0x44 Interrupt Clear Register
     dmacr: ReadWrite<u32>, // 0x48 DMA Control Register
 }
@@ -58,7 +58,7 @@ fn verify_uart_regs_layout() {
     // These will cause compile-time errors if offsets don't match
     const _: () = assert!(offset_of!(UartRegs, dr) == 0x00);
     const _: () = assert!(offset_of!(UartRegs, rsr) == 0x04);
-    const _: () = assert!(offset_of!(UartRegs, tfr) == 0x18);
+    const _: () = assert!(offset_of!(UartRegs, fr) == 0x18);
     const _: () = assert!(offset_of!(UartRegs, iplr) == 0x20);
     const _: () = assert!(offset_of!(UartRegs, ibrd) == 0x24);
     const _: () = assert!(offset_of!(UartRegs, fbrd) == 0x28);
@@ -66,8 +66,8 @@ fn verify_uart_regs_layout() {
     const _: () = assert!(offset_of!(UartRegs, cr) == 0x30);
     const _: () = assert!(offset_of!(UartRegs, ifls) == 0x34);
     const _: () = assert!(offset_of!(UartRegs, imsc) == 0x38);
-    const _: () = assert!(offset_of!(UartRegs, tris) == 0x3c);
-    const _: () = assert!(offset_of!(UartRegs, tmis) == 0x40);
+    const _: () = assert!(offset_of!(UartRegs, ris) == 0x3c);
+    const _: () = assert!(offset_of!(UartRegs, mis) == 0x40);
     const _: () = assert!(offset_of!(UartRegs, icr) == 0x44);
     const _: () = assert!(offset_of!(UartRegs, dmacr) == 0x48);
 }
@@ -162,12 +162,12 @@ extern "C" fn uart_irq(arg: *mut c_void) -> sys::handler_return {
 
     let mut resched = false;
 
-    let isr = field!(dev, tmis).read();
+    let isr = field!(dev, mis).read();
 
     // Read characters from the fifo until it's empty.
     // TODO: This is wrong, and doesn't handle the cbuf overflow.
     if (isr & UART_TMIS_RXMIS) != 0 {
-        while (field!(dev, tfr).read() & UART_TFR_RXFE) == 0 {
+        while (field!(dev, fr).read() & UART_TFR_RXFE) == 0 {
             if CONSOLE_HAS_INPUT_BUFFER {
                 if uart.config.flag & PL011_FLAG_DEBUG_UART != 0 {
                     let c = field!(dev, dr).read() as c_char;
@@ -247,7 +247,7 @@ extern "C" fn uart_putc(port: c_int, c: c_char) {
     let mut dev = uart.get_sdev();
 
     // Spin while fifo is full.
-    while (field!(dev, tfr).read() & UART_TFR_TXFF) != 0 {}
+    while (field!(dev, fr).read() & UART_TFR_TXFF) != 0 {}
     field!(dev, dr).write(c as u32);
 }
 
@@ -263,7 +263,7 @@ extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
         // interrupt, this isn't unsafe or incorrect, but will cause problems if
         // we even implement the transmit interrupt as well.
         // Realistically, the interrupt handler should not be touching this register
-        let mut f = field!(dev, tmis);
+        let mut f = field!(dev, mis);
         let old = f.read();
         f.write(old | UART_TMIS_RXMIS);
         return ch as c_int;
@@ -279,7 +279,7 @@ extern "C" fn uart_pputc(port: c_int, c: c_char) -> c_int {
     let mut dev = uart.get_sdev();
 
     // Spin while fifo is full.
-    while field!(dev, tfr).read() & UART_TFR_TXFF != 0 {}
+    while field!(dev, fr).read() & UART_TFR_TXFF != 0 {}
     field!(dev, dr).write(c as u32);
 
     return 1;
