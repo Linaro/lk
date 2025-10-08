@@ -144,7 +144,7 @@ impl Pl011Uart {
     ///
     /// It is important that the returned handle is 'static, otherwise we only
     /// get one borrow which defeats the entire purpose of this routine.
-    fn get_sdev(&self) -> UniqueMmioPointer<'static, UartRegs> {
+    fn get_dev(&self) -> UniqueMmioPointer<'static, UartRegs> {
         unsafe { UniqueMmioPointer::new(NonNull::new(self.config.base as _).unwrap()) }
     }
 }
@@ -155,7 +155,7 @@ static PL011_UARTS: [LkOnce<Pl011Uart>; 1] = [LkOnce::uninit()];
 
 extern "C" fn uart_irq(arg: *mut c_void) -> sys::handler_return {
     let uart = unsafe { &*(arg as *const Pl011Uart) };
-    let mut dev = uart.get_sdev();
+    let mut dev = uart.get_dev();
     let buf = get_console_input_cbuf();
 
     // uart_pputc(0, b'I');
@@ -213,7 +213,7 @@ extern "C" fn pl011_init(port: isize) {
             let uart = &mut *uart;
             sys::cbuf_initialize(uart.rx_buf.get(), RXBUF_SIZE);
 
-            let mut dev = uart.get_sdev();
+            let mut dev = uart.get_dev();
 
             sys::register_int_handler(
                 uart.config.irq,
@@ -244,7 +244,7 @@ extern "C" fn pl011_init(port: isize) {
 #[unsafe(no_mangle)]
 extern "C" fn uart_putc(port: c_int, c: c_char) {
     let uart = get_uart_early(port as usize);
-    let mut dev = uart.get_sdev();
+    let mut dev = uart.get_dev();
 
     // Spin while fifo is full.
     while (field!(dev, fr).read() & UART_TFR_TXFF) != 0 {}
@@ -254,7 +254,7 @@ extern "C" fn uart_putc(port: c_int, c: c_char) {
 #[unsafe(no_mangle)]
 extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
     let uart = get_uart(port as usize);
-    let mut dev = uart.get_sdev();
+    let mut dev = uart.get_dev();
     let buf = unsafe { Cbuf::new(uart.rx_buf.get()) };
 
     if let Some(ch) = buf.read_char(wait) {
@@ -276,7 +276,7 @@ extern "C" fn uart_getc(port: c_int, wait: bool) -> c_int {
 #[unsafe(no_mangle)]
 extern "C" fn uart_pputc(port: c_int, c: c_char) -> c_int {
     let uart = get_uart_early(port as usize);
-    let mut dev = uart.get_sdev();
+    let mut dev = uart.get_dev();
 
     // Spin while fifo is full.
     while field!(dev, fr).read() & UART_TFR_TXFF != 0 {}
