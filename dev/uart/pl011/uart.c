@@ -7,7 +7,7 @@
  */
 #include "dev/uart/pl011.h"
 
-#if 0
+#ifndef USE_RUST_PL011
 #include <assert.h>
 #include <dev/uart.h>
 #include <kernel/thread.h>
