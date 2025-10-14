@@ -9,7 +9,8 @@ gmake \
 	'LD=/usr/bin/ld.lld' \
 	CPPFILT=/usr/bin/llvm-cxxfilt-14 \
 	TOOLCHAIN_PREFIX=/usr/bin/llvm- \
-	-j 12
+	-j 12 \
+    build-qemu-virt-arm64-test/lk.elf
     # -j1
 
 
